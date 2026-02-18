@@ -1,5 +1,7 @@
 (function () {
   const LS_KEY = "AIC_KOSIRAI_SMS_DB_V1";
+  const SESSION_KEY = "AIC_SMS_SESSION";
+  const THEME_KEY = "AIC_SMS_THEME";
   const app = document.getElementById("app");
 
   function uid(prefix){
@@ -19,16 +21,33 @@
   }
 
   function getSession(){
-    const raw = localStorage.getItem("AIC_SMS_SESSION");
+    const raw = localStorage.getItem(SESSION_KEY);
     return raw ? JSON.parse(raw) : null;
   }
 
   function setSession(session){
-    localStorage.setItem("AIC_SMS_SESSION", JSON.stringify(session));
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   }
 
   function clearSession(){
-    localStorage.removeItem("AIC_SMS_SESSION");
+    localStorage.removeItem(SESSION_KEY);
+  }
+
+  function getTheme(){
+    return localStorage.getItem(THEME_KEY) || "dark";
+  }
+
+  function setTheme(mode){
+    const root = document.documentElement;
+    if (mode === "light") root.setAttribute("data-theme", "light");
+    else root.removeAttribute("data-theme");
+    localStorage.setItem(THEME_KEY, mode);
+  }
+
+  function toggleTheme(){
+    const current = getTheme();
+    setTheme(current === "light" ? "dark" : "light");
+    render();
   }
 
   function gradeFromMark(mark){
@@ -65,16 +84,26 @@
     app.innerHTML = html;
   }
 
-  function topbarView(session){
+  function wrapTables(html){
+    return html.replace(/<table class="table">[\s\S]*?<\/table>/g, (m) => {
+      return `<div class="table-wrap">${m}</div>`;
+    });
+  }
+
+  function topbarView(session, opts){
     const role = session?.role || "";
     const name = session?.fullName || "";
     const pill = role === "teacher" ? "teacher" : "student";
     const roleLabel = role === "teacher" ? "Teacher Portal" : "Student Portal";
 
+    const showAuth = !!session;
+    const showMobileMenu = !!opts?.showMobileMenu;
+
     return `
       <div class="topbar">
         <div class="brand">
-          <div class="logo"></div>
+          ${showMobileMenu ? `<button class="btn icon mobileOnly" id="openDrawerBtn" aria-label="Open menu">☰</button>` : ""}
+          <div class="logo" aria-hidden="true"></div>
           <div>
             <h1>AIC KOSIRAI ACADEMY</h1>
             <p>School Management System</p>
@@ -82,27 +111,112 @@
         </div>
 
         <div class="userchip">
-          <span class="pill ${pill}">${roleLabel}</span>
-          <span class="small">${escapeHtml(name)}</span>
-          <button class="btn" id="logoutBtn">Sign out</button>
+          ${showAuth ? `<span class="pill ${pill}">${roleLabel}</span>` : ""}
+          ${showAuth ? `<span class="small">${escapeHtml(name)}</span>` : `<span class="small">Demo access. Password for all users: 1234</span>`}
+          <button class="btn icon" id="themeBtn" aria-label="Toggle theme">${getTheme() === "light" ? "☀" : "🌙"}</button>
+          ${showAuth ? `<button class="btn" id="logoutBtn">Sign out</button>` : ""}
         </div>
       </div>
     `;
   }
 
+  function drawerView(session, navItems, activeKey){
+    const roleLabel = session.role === "teacher" ? "Teacher Menu" : "Student Menu";
+    const navButtons = navItems.map(n => `
+      <button class="${n.key === activeKey ? "active" : ""}" data-nav="${n.key}">
+        <span>${escapeHtml(n.label)}</span>
+        <span class="small">${escapeHtml(n.hint || "")}</span>
+      </button>
+    `).join("");
+
+    return `
+      <div class="drawer mobileOnly" id="drawer">
+        <div class="overlay" id="drawerOverlay"></div>
+        <div class="panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(roleLabel)}">
+          <div class="drawerHeader">
+            <div>
+              <p class="drawerTitle">${escapeHtml(roleLabel)}</p>
+              <div class="small">${escapeHtml(session.fullName || "")}</div>
+            </div>
+            <button class="btn icon" id="closeDrawerBtn" aria-label="Close menu">✕</button>
+          </div>
+
+          <div class="sidebar" style="margin-top:12px;">
+            <div class="hero">
+              <img src="assets/school.jpg" alt="AIC Kosirai Academy" />
+              <div class="herotext">
+                <h2>${escapeHtml(session.role === "teacher" ? "Teacher Workspace" : "Student Workspace")}</h2>
+                <p>${escapeHtml(session.role === "teacher" ? "Plan, teach, assess, publish." : "Learn, submit, track progress.")}</p>
+              </div>
+            </div>
+            <div class="nav" id="drawerNav">
+              ${navButtons}
+            </div>
+          </div>
+
+          <div class="drawerFooter">
+            <button class="btn" id="themeBtnMobile">${getTheme() === "light" ? "Switch to dark" : "Switch to light"}</button>
+            <button class="btn danger" id="logoutBtnMobile">Sign out</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function openDrawer(){
+    const el = document.getElementById("drawer");
+    if (!el) return;
+    el.classList.add("open");
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeDrawer(){
+    const el = document.getElementById("drawer");
+    if (!el) return;
+    el.classList.remove("open");
+    document.body.style.overflow = "";
+  }
+
+  function bindDrawerEvents(){
+    const openBtn = document.getElementById("openDrawerBtn");
+    const closeBtn = document.getElementById("closeDrawerBtn");
+    const overlay = document.getElementById("drawerOverlay");
+    const themeBtnMobile = document.getElementById("themeBtnMobile");
+    const logoutBtnMobile = document.getElementById("logoutBtnMobile");
+    const drawerNav = document.getElementById("drawerNav");
+
+    if (openBtn) openBtn.onclick = openDrawer;
+    if (closeBtn) closeBtn.onclick = closeDrawer;
+    if (overlay) overlay.onclick = closeDrawer;
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeDrawer();
+    });
+
+    if (themeBtnMobile) themeBtnMobile.onclick = () => {
+      toggleTheme();
+    };
+
+    if (logoutBtnMobile) logoutBtnMobile.onclick = () => {
+      clearSession();
+      closeDrawer();
+      loginView("");
+    };
+
+    if (drawerNav){
+      drawerNav.querySelectorAll("button[data-nav]").forEach(btn => {
+        btn.onclick = () => {
+          closeDrawer();
+          routeTo(btn.getAttribute("data-nav"));
+        };
+      });
+    }
+  }
+
   function loginView(errMsg){
     mount(`
       <div class="container">
-        <div class="topbar">
-          <div class="brand">
-            <div class="logo"></div>
-            <div>
-              <h1>AIC KOSIRAI ACADEMY</h1>
-              <p>School Management System</p>
-            </div>
-          </div>
-          <div class="small">Demo access. Password for all users: 1234</div>
-        </div>
+        ${topbarView(null, { showMobileMenu: false })}
 
         <div class="grid" style="grid-template-columns: 1fr 1fr;">
           <div class="main">
@@ -110,6 +224,9 @@
               <div>
                 <h3>Welcome</h3>
                 <p>Choose a role, then sign in.</p>
+              </div>
+              <div class="row" style="margin-top:0;">
+                <span class="badge">Password: 1234</span>
               </div>
             </div>
 
@@ -138,7 +255,7 @@
                 </div>
               </div>
 
-              ${errMsg ? `<div class="notice" style="border-color: rgba(239,68,68,.35); color: rgba(255,210,210,.92)">${escapeHtml(errMsg)}</div>` : ""}
+              ${errMsg ? `<div class="notice" style="border-color: rgba(239,68,68,.35); color: var(--text)">${escapeHtml(errMsg)}</div>` : ""}
 
               <div class="row">
                 <button class="btn primary" id="signInBtn">Sign in</button>
@@ -146,12 +263,12 @@
               </div>
 
               <div class="notice">
-                Demo security note: local storage stores demo data. Use a backend for real deployment.
+                Demo stores data in the browser only.
               </div>
             </div>
           </div>
 
-          <div class="sidebar">
+          <div class="sidebar desktopOnly">
             <div class="hero">
               <img src="assets/school.jpg" alt="AIC Kosirai Academy" />
               <div class="herotext">
@@ -176,9 +293,24 @@
               </div>
             </div>
           </div>
+
+          <div class="sidebar mobileOnly">
+            <div class="hero">
+              <img src="assets/school.jpg" alt="AIC Kosirai Academy" />
+              <div class="herotext">
+                <h2>Administration Block</h2>
+                <p>Mobile ready and fast.</p>
+              </div>
+            </div>
+            <div class="content">
+              <div class="notice">Tip: Use teacher / student with password 1234.</div>
+            </div>
+          </div>
         </div>
       </div>
     `);
+
+    document.getElementById("themeBtn").onclick = toggleTheme;
 
     document.getElementById("signInBtn").onclick = () => {
       const db = loadDB();
@@ -209,12 +341,15 @@
       </button>
     `).join("");
 
+    const body = wrapTables(bodyHtml);
+
     mount(`
       <div class="container">
-        ${topbarView(session)}
+        ${topbarView(session, { showMobileMenu: true })}
+        ${drawerView(session, navItems, activeKey)}
 
         <div class="grid">
-          <div class="sidebar">
+          <div class="sidebar desktopOnly">
             <div class="hero">
               <img src="assets/school.jpg" alt="AIC Kosirai Academy" />
               <div class="herotext">
@@ -240,12 +375,14 @@
             </div>
 
             <div class="content">
-              ${bodyHtml}
+              ${body}
             </div>
           </div>
         </div>
       </div>
     `);
+
+    document.getElementById("themeBtn").onclick = toggleTheme;
 
     document.getElementById("logoutBtn").onclick = () => {
       clearSession();
@@ -253,12 +390,16 @@
     };
 
     const nav = document.getElementById("nav");
-    nav.querySelectorAll("button[data-nav]").forEach(btn => {
-      btn.onclick = () => routeTo(btn.getAttribute("data-nav"));
-    });
+    if (nav){
+      nav.querySelectorAll("button[data-nav]").forEach(btn => {
+        btn.onclick = () => routeTo(btn.getAttribute("data-nav"));
+      });
+    }
+
+    bindDrawerEvents();
   }
 
-  function teacherNav(db){
+  function teacherNav(){
     return [
       { key:"t_dashboard", label:"Dashboard", hint:"Overview" },
       { key:"t_materials", label:"Course Materials", hint:"Upload" },
@@ -271,7 +412,7 @@
     ];
   }
 
-  function studentNav(db){
+  function studentNav(){
     return [
       { key:"s_dashboard", label:"Dashboard", hint:"Today" },
       { key:"s_assignments", label:"Assignments", hint:"Submit" },
@@ -286,10 +427,12 @@
     const pending = db.assignments.length;
     const submissions = db.submissions.length;
     const publishedResults = db.results.filter(r => r.published).length;
-    const pinned = db.announcements.filter(a => a.pinned).length;
 
-    const recentA = [...db.announcements].sort((a,b)=>b.createdAt-a.createdAt).slice(0,4)
-      .map(a => `<tr><td>${escapeHtml(a.title)}</td><td>${a.pinned ? `<span class="badge warn">Pinned</span>` : `<span class="badge">Normal</span>`}</td><td>${escapeHtml(fmtDate(a.createdAt))}</td></tr>`).join("");
+    const recentA = [...db.announcements]
+      .sort((a,b)=>b.createdAt-a.createdAt)
+      .slice(0,4)
+      .map(a => `<tr><td>${escapeHtml(a.title)}</td><td>${a.pinned ? `<span class="badge warn">Pinned</span>` : `<span class="badge">Normal</span>`}</td><td>${escapeHtml(fmtDate(a.createdAt))}</td></tr>`)
+      .join("");
 
     const body = `
       <div class="cards">
@@ -301,13 +444,13 @@
       <div class="split" style="margin-top:12px;">
         <div class="card">
           <h4>Quick actions</h4>
-          <p>Post, upload, publish in seconds.</p>
+          <p>Post, upload, publish fast.</p>
           <div class="row">
             <button class="btn primary" data-go="t_assignments">New assignment</button>
             <button class="btn good" data-go="t_results">Publish results</button>
             <button class="btn" data-go="t_materials">Upload material</button>
           </div>
-          <div class="notice">Data stays inside the browser for demo use.</div>
+          <div class="notice">Demo data stays inside the browser.</div>
         </div>
 
         <div class="card">
@@ -323,7 +466,7 @@
       </table>
     `;
 
-    layoutView(session, teacherNav(db), "t_dashboard",
+    layoutView(session, teacherNav(), "t_dashboard",
       "Teacher Dashboard",
       "Manage learning content, assessment, and communication.",
       body
@@ -335,15 +478,17 @@
   }
 
   function teacherMaterials(db, session){
-    const rows = [...db.materials].sort((a,b)=>b.createdAt-a.createdAt).map(m => `
-      <tr>
-        <td>${escapeHtml(m.title)}</td>
-        <td>${escapeHtml(m.subject)}</td>
-        <td>${escapeHtml(m.className)}</td>
-        <td>${escapeHtml(m.fileName)}</td>
-        <td>${escapeHtml(fmtDate(m.createdAt))}</td>
-      </tr>
-    `).join("");
+    const rows = [...db.materials]
+      .sort((a,b)=>b.createdAt-a.createdAt)
+      .map(m => `
+        <tr>
+          <td>${escapeHtml(m.title)}</td>
+          <td>${escapeHtml(m.subject)}</td>
+          <td>${escapeHtml(m.className)}</td>
+          <td>${escapeHtml(m.fileName)}</td>
+          <td>${escapeHtml(fmtDate(m.createdAt))}</td>
+        </tr>
+      `).join("");
 
     const subjectOptions = db.subjects.map(s=>`<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
     const classOptions = db.classes.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
@@ -351,7 +496,7 @@
     const body = `
       <div class="card">
         <h4>Upload course material</h4>
-        <p>Store a file name and details for demo use.</p>
+        <p>Stores the file name and details for demo use.</p>
 
         <div class="form">
           <div class="field">
@@ -380,7 +525,7 @@
           <button class="btn primary" id="m_add">Save material</button>
           <button class="btn danger" id="m_clear">Clear all materials</button>
         </div>
-        <div class="notice">GitHub Pages stores no server files. Demo stores metadata in local storage.</div>
+        <div class="notice">GitHub Pages has no backend storage. Demo uses local storage.</div>
       </div>
 
       <table class="table">
@@ -389,7 +534,7 @@
       </table>
     `;
 
-    layoutView(session, teacherNav(db), "t_materials",
+    layoutView(session, teacherNav(), "t_materials",
       "Course Materials",
       "Upload and organize learning content by subject and class.",
       body
@@ -431,15 +576,17 @@
     const subjectOptions = db.subjects.map(s=>`<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
     const classOptions = db.classes.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
 
-    const rows = [...db.lessonPlans].sort((a,b)=>b.createdAt-a.createdAt).map(p => `
-      <tr>
-        <td>${escapeHtml(p.week)}</td>
-        <td>${escapeHtml(p.subject)}</td>
-        <td>${escapeHtml(p.className)}</td>
-        <td>${escapeHtml(p.topic)}</td>
-        <td>${escapeHtml(fmtDate(p.createdAt))}</td>
-      </tr>
-    `).join("");
+    const rows = [...db.lessonPlans]
+      .sort((a,b)=>b.createdAt-a.createdAt)
+      .map(p => `
+        <tr>
+          <td>${escapeHtml(p.week)}</td>
+          <td>${escapeHtml(p.subject)}</td>
+          <td>${escapeHtml(p.className)}</td>
+          <td>${escapeHtml(p.topic)}</td>
+          <td>${escapeHtml(fmtDate(p.createdAt))}</td>
+        </tr>
+      `).join("");
 
     const body = `
       <div class="card">
@@ -493,9 +640,9 @@
       </table>
     `;
 
-    layoutView(session, teacherNav(db), "t_plans",
+    layoutView(session, teacherNav(), "t_plans",
       "Lesson Plans",
-      "Plan weekly instruction and store a professional teaching record.",
+      "Plan weekly instruction and store a professional record.",
       body
     );
 
@@ -579,9 +726,9 @@
       </table>
     `;
 
-    layoutView(session, teacherNav(db), "t_timetable",
+    layoutView(session, teacherNav(), "t_timetable",
       "Timetables",
-      "Build class timetables and publish to student view.",
+      "Build timetables and publish to student view.",
       body
     );
 
@@ -608,14 +755,16 @@
     const classOptions = db.classes.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
     const subjectOptions = db.subjects.map(s=>`<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
 
-    const rows = [...db.assignments].sort((a,b)=>b.createdAt-a.createdAt).map(a=>`
-      <tr>
-        <td>${escapeHtml(a.title)}</td>
-        <td>${escapeHtml(a.subject)}</td>
-        <td>${escapeHtml(a.className)}</td>
-        <td>${escapeHtml(new Date(a.dueAt).toLocaleDateString())}</td>
-      </tr>
-    `).join("");
+    const rows = [...db.assignments]
+      .sort((a,b)=>b.createdAt-a.createdAt)
+      .map(a=>`
+        <tr>
+          <td>${escapeHtml(a.title)}</td>
+          <td>${escapeHtml(a.subject)}</td>
+          <td>${escapeHtml(a.className)}</td>
+          <td>${escapeHtml(new Date(a.dueAt).toLocaleDateString())}</td>
+        </tr>
+      `).join("");
 
     const body = `
       <div class="card">
@@ -661,7 +810,7 @@
       </table>
     `;
 
-    layoutView(session, teacherNav(db), "t_assignments",
+    layoutView(session, teacherNav(), "t_assignments",
       "Assignments",
       "Create and publish assignments for student submission.",
       body
@@ -701,27 +850,31 @@
   }
 
   function teacherSubmissions(db, session){
-    const rows = [...db.submissions].sort((a,b)=>b.submittedAt-a.submittedAt).map(s=>{
-      const asg = db.assignments.find(x=>x.id===s.assignmentId);
-      const title = asg ? asg.title : "Unknown assignment";
-      const grade = typeof s.grade === "number" ? `${s.grade}% (${gradeFromMark(s.grade)})` : "Not graded";
-      return `
-        <tr>
-          <td>${escapeHtml(title)}</td>
-          <td>${escapeHtml(s.student)}</td>
-          <td>${escapeHtml(s.fileName)}</td>
-          <td>${escapeHtml(fmtDate(s.submittedAt))}</td>
-          <td>${escapeHtml(grade)}</td>
-        </tr>
-      `;
-    }).join("");
+    const rows = [...db.submissions]
+      .sort((a,b)=>b.submittedAt-a.submittedAt)
+      .map(s=>{
+        const asg = db.assignments.find(x=>x.id===s.assignmentId);
+        const title = asg ? asg.title : "Unknown assignment";
+        const grade = typeof s.grade === "number" ? `${s.grade}% (${gradeFromMark(s.grade)})` : "Not graded";
+        return `
+          <tr>
+            <td>${escapeHtml(title)}</td>
+            <td>${escapeHtml(s.student)}</td>
+            <td>${escapeHtml(s.fileName)}</td>
+            <td>${escapeHtml(fmtDate(s.submittedAt))}</td>
+            <td>${escapeHtml(grade)}</td>
+          </tr>
+        `;
+      }).join("");
 
-    const assignmentOptions = db.assignments.map(a=>`<option value="${a.id}">${escapeHtml(a.title)} | ${escapeHtml(a.className)} | ${escapeHtml(a.subject)}</option>`).join("");
+    const assignmentOptions = db.assignments
+      .map(a=>`<option value="${a.id}">${escapeHtml(a.title)} | ${escapeHtml(a.className)} | ${escapeHtml(a.subject)}</option>`)
+      .join("");
 
     const body = `
       <div class="card">
         <h4>Grade submission</h4>
-        <p>Select an assignment. Grade the student account submission for demo.</p>
+        <p>Select an assignment. Save a grade and feedback.</p>
 
         <div class="form">
           <div class="field" style="grid-column: 1 / -1;">
@@ -753,7 +906,7 @@
       </table>
     `;
 
-    layoutView(session, teacherNav(db), "t_submissions",
+    layoutView(session, teacherNav(), "t_submissions",
       "Submissions and Grading",
       "View submissions and store grades with feedback.",
       body
@@ -791,6 +944,7 @@
   function teacherResults(db, session){
     const termOptions = ["Term 1 2026","Term 2 2026","Term 3 2026"].map(t=>`<option value="${t}">${t}</option>`).join("");
     const classOptions = db.classes.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+
     const subjectFields = db.subjects.map(s=>`
       <div class="field">
         <label>${escapeHtml(s)} mark</label>
@@ -798,18 +952,20 @@
       </div>
     `).join("");
 
-    const rows = [...db.results].sort((a,b)=>b.createdAt-a.createdAt).map(r=>{
-      const mean = meanFromMarks(r.marks);
-      return `
-        <tr>
-          <td>${escapeHtml(r.student)}</td>
-          <td>${escapeHtml(r.className)}</td>
-          <td>${escapeHtml(r.term)}</td>
-          <td>${escapeHtml(mean)}</td>
-          <td>${r.published ? `<span class="badge good">Published</span>` : `<span class="badge warn">Draft</span>`}</td>
-        </tr>
-      `;
-    }).join("");
+    const rows = [...db.results]
+      .sort((a,b)=>b.createdAt-a.createdAt)
+      .map(r=>{
+        const mean = meanFromMarks(r.marks);
+        return `
+          <tr>
+            <td>${escapeHtml(r.student)}</td>
+            <td>${escapeHtml(r.className)}</td>
+            <td>${escapeHtml(r.term)}</td>
+            <td>${escapeHtml(mean)}</td>
+            <td>${r.published ? `<span class="badge good">Published</span>` : `<span class="badge warn">Draft</span>`}</td>
+          </tr>
+        `;
+      }).join("");
 
     const body = `
       <div class="card">
@@ -846,7 +1002,7 @@
       </table>
     `;
 
-    layoutView(session, teacherNav(db), "t_results",
+    layoutView(session, teacherNav(), "t_results",
       "Results and Report Cards",
       "Store marks per subject, compute mean, publish to students.",
       body
@@ -870,7 +1026,7 @@
 
       if (!Object.keys(marks).length) return routeTo("t_results");
 
-      const r = {
+      db.results.unshift({
         id: uid("res"),
         term,
         student,
@@ -878,9 +1034,8 @@
         marks,
         published: !!publish,
         createdAt: Date.now()
-      };
+      });
 
-      db.results.unshift(r);
       saveDB(db);
       routeTo("t_results");
     }
@@ -895,13 +1050,15 @@
   }
 
   function teacherAnnouncements(db, session){
-    const rows = [...db.announcements].sort((a,b)=>b.createdAt-a.createdAt).map(a=>`
-      <tr>
-        <td>${escapeHtml(a.title)}</td>
-        <td>${a.pinned ? `<span class="badge warn">Pinned</span>` : `<span class="badge">Normal</span>`}</td>
-        <td>${escapeHtml(fmtDate(a.createdAt))}</td>
-      </tr>
-    `).join("");
+    const rows = [...db.announcements]
+      .sort((a,b)=>b.createdAt-a.createdAt)
+      .map(a=>`
+        <tr>
+          <td>${escapeHtml(a.title)}</td>
+          <td>${a.pinned ? `<span class="badge warn">Pinned</span>` : `<span class="badge">Normal</span>`}</td>
+          <td>${escapeHtml(fmtDate(a.createdAt))}</td>
+        </tr>
+      `).join("");
 
     const body = `
       <div class="card">
@@ -938,7 +1095,7 @@
       </table>
     `;
 
-    layoutView(session, teacherNav(db), "t_announcements",
+    layoutView(session, teacherNav(), "t_announcements",
       "Announcements",
       "Publish school notices and pin urgent messages.",
       body
@@ -967,7 +1124,9 @@
     const today = new Date().toLocaleDateString(undefined, { weekday: "long" });
     const todayRows = db.timetable.filter(t => t.className === cls && t.day === today).slice(0,6);
 
-    const aRows = [...db.announcements].sort((a,b)=>b.createdAt-a.createdAt).slice(0,3)
+    const aCards = [...db.announcements]
+      .sort((a,b)=>b.createdAt-a.createdAt)
+      .slice(0,3)
       .map(a=>`
         <div class="card">
           <h4>${escapeHtml(a.title)} ${a.pinned ? `<span class="badge warn">Pinned</span>` : ""}</h4>
@@ -1033,13 +1192,13 @@
             <p style="margin:6px 0 0;color:var(--muted);font-size:12px;">School updates and notices.</p>
           </div>
         </div>
-        <div class="cards" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
-          ${aRows || `<div class="notice">No announcements.</div>`}
+        <div class="cards">
+          ${aCards || `<div class="notice">No announcements.</div>`}
         </div>
       </div>
     `;
 
-    layoutView(session, studentNav(db), "s_dashboard",
+    layoutView(session, studentNav(), "s_dashboard",
       "Student Dashboard",
       "View timetable, assignments, announcements, and results.",
       body
@@ -1048,6 +1207,7 @@
 
   function studentAssignments(db, session){
     const cls = session.className || "JSS 2";
+
     const rows = [...db.assignments]
       .filter(a=>a.className===cls)
       .sort((a,b)=>a.dueAt-b.dueAt)
@@ -1072,7 +1232,7 @@
     const body = `
       <div class="card">
         <h4>Submit assignment</h4>
-        <p>Upload work file and add a note.</p>
+        <p>Upload your work and add a note.</p>
 
         <div class="form">
           <div class="field" style="grid-column: 1 / -1;">
@@ -1102,7 +1262,7 @@
       </table>
     `;
 
-    layoutView(session, studentNav(db), "s_assignments",
+    layoutView(session, studentNav(), "s_assignments",
       "Assignments",
       "View assignments and submit work before due date.",
       body
@@ -1135,6 +1295,7 @@
       .sort((a,b)=>b.createdAt-a.createdAt);
 
     const latest = published[0];
+
     const body = latest ? (() => {
       const marksRows = Object.entries(latest.marks)
         .map(([sub, mark])=>{
@@ -1156,13 +1317,13 @@
           <tbody>${marksRows}</tbody>
         </table>
 
-        <div class="notice">Teacher publishes results. Student view shows published reports only.</div>
+        <div class="notice">Students see published reports only.</div>
       `;
     })() : `
       <div class="notice">No published results yet.</div>
     `;
 
-    layoutView(session, studentNav(db), "s_results",
+    layoutView(session, studentNav(), "s_results",
       "Results",
       "View published report cards and subject marks.",
       body
@@ -1192,7 +1353,7 @@
       `;
     }).join("");
 
-    layoutView(session, studentNav(db), "s_timetable",
+    layoutView(session, studentNav(), "s_timetable",
       "Timetable",
       "View weekly class timetable.",
       `<div class="cards" style="grid-template-columns: 1fr; gap:12px;">${dayBlocks}</div>`
@@ -1209,7 +1370,7 @@
       </tr>
     `).join("");
 
-    layoutView(session, studentNav(db), "s_activities",
+    layoutView(session, studentNav(), "s_activities",
       "Activities",
       "Clubs, sports, and school programs.",
       `
@@ -1226,7 +1387,8 @@
   }
 
   function studentAnnouncements(db, session){
-    const items = [...db.announcements].sort((a,b)=> (b.pinned - a.pinned) || (b.createdAt - a.createdAt))
+    const items = [...db.announcements]
+      .sort((a,b)=> (b.pinned - a.pinned) || (b.createdAt - a.createdAt))
       .map(a=>`
         <div class="card">
           <h4>${escapeHtml(a.title)} ${a.pinned ? `<span class="badge warn">Pinned</span>` : ""}</h4>
@@ -1235,7 +1397,7 @@
         </div>
       `).join("");
 
-    layoutView(session, studentNav(db), "s_announcements",
+    layoutView(session, studentNav(), "s_announcements",
       "Announcements",
       "Read pinned notices and school updates.",
       `<div class="cards">${items || `<div class="notice">No announcements.</div>`}</div>`
@@ -1248,6 +1410,8 @@
   }
 
   function render(){
+    setTheme(getTheme());
+
     const db = loadDB();
     const session = getSession();
 
